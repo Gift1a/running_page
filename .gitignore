@@ -1,0 +1,5 @@
+data/secrets/
+data/fit/
+data/derived/
+public/data/
+node_modules/
