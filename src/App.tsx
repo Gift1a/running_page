@@ -5,7 +5,6 @@ import Heatmap from "./components/Heatmap";
 import MonthlySummary from "./components/MonthlySummary";
 import PersonalBests from "./components/PersonalBests";
 import { loadData } from "./data/api";
-import type { CityStat } from "./types";
 import { formatDistanceKm, formatPace } from "./utils/format";
 
 type StatCardProps = {
@@ -40,16 +39,6 @@ export default function App() {
     }
     return "light";
   });
-  const previewCities: CityStat[] = [
-    { city: "Shanghai", country: "CN", admin1: null, runs: 2, distanceM: 12000, avgPaceSecPerKm: 340 },
-    { city: "Beijing", country: "CN", admin1: null, runs: 1, distanceM: 11000, avgPaceSecPerKm: 360 },
-    { city: "Shenzhen", country: "CN", admin1: null, runs: 2, distanceM: 9000, avgPaceSecPerKm: 370 },
-    { city: "Guangzhou", country: "CN", admin1: null, runs: 1, distanceM: 8500, avgPaceSecPerKm: 365 },
-    { city: "Chengdu", country: "CN", admin1: null, runs: 1, distanceM: 7000, avgPaceSecPerKm: 380 },
-    { city: "Nanjing", country: "CN", admin1: null, runs: 1, distanceM: 6000, avgPaceSecPerKm: 355 },
-    { city: "Suzhou", country: "CN", admin1: null, runs: 1, distanceM: 5000, avgPaceSecPerKm: 345 },
-    { city: "Changsha", country: "CN", admin1: null, runs: 1, distanceM: 4500, avgPaceSecPerKm: 390 },
-  ];
   const years = useMemo(() => {
     const set = new Set((data?.daily ?? []).map((entry) => Number(entry.date.slice(0, 4))));
     return Array.from(set).sort((a, b) => a - b);
@@ -66,8 +55,7 @@ export default function App() {
   const [cityLimit, setCityLimit] = useState<number>(8);
   const cityStatsView = useMemo(() => {
     const stats = data?.cityStats ?? [];
-    const base = stats.length >= 8 ? stats : [...stats, ...previewCities];
-    return [...base].sort((a, b) => b.distanceM - a.distanceM);
+    return [...stats].sort((a, b) => b.distanceM - a.distanceM);
   }, [data]);
 
   useEffect(() => {
