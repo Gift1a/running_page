@@ -1,8 +1,9 @@
-﻿import type { Activity } from "../types";
+﻿import type { Activity, PersonalRecordItem, PersonalRecords } from "../types";
 import { formatDistanceKm, formatDuration } from "../utils/format";
 
 type Props = {
   activities: Activity[];
+  personalRecords?: PersonalRecords | null;
 };
 
 type BestItem = {
@@ -74,7 +75,11 @@ function pickBestByTime(
   return best;
 }
 
-export default function PersonalBests({ activities }: Props) {
+function getRecordDate(record: PersonalRecordItem | null | undefined, fallback?: string) {
+  return record?.date ?? fallback ?? "--";
+}
+
+export default function PersonalBests({ activities, personalRecords }: Props) {
   const best5kExact = pickBestByTime(
     activities,
     (activity) => isDistanceNear(activity.distanceM ?? null, 5000)
@@ -100,21 +105,28 @@ export default function PersonalBests({ activities }: Props) {
   const best5kTime = best5k ? getActivityTimeSeconds(best5k) : null;
   const best10kTime = best10k ? getActivityTimeSeconds(best10k) : null;
 
+  const pr5k = personalRecords?.best5k ?? null;
+  const pr10k = personalRecords?.best10k ?? null;
+  const prLongest = personalRecords?.longestDistance ?? null;
+  const displayBest5kTime = pr5k?.timeSec ?? best5kTime;
+  const displayBest10kTime = pr10k?.timeSec ?? best10kTime;
+  const displayLongestDistance = prLongest?.distanceM ?? longestDistance?.distanceM ?? null;
+
   const items: BestItem[] = [
     {
       label: "最佳 5 公里",
-      value: best5kTime ? formatDuration(best5kTime) : "--",
-      date: best5k?.date ?? "--",
+      value: displayBest5kTime ? formatDuration(displayBest5kTime) : "--",
+      date: getRecordDate(pr5k, best5k?.date),
     },
     {
       label: "最佳 10 公里",
-      value: best10kTime ? formatDuration(best10kTime) : "--",
-      date: best10k?.date ?? "--",
+      value: displayBest10kTime ? formatDuration(displayBest10kTime) : "--",
+      date: getRecordDate(pr10k, best10k?.date),
     },
     {
       label: "最长距离",
-      value: longestDistance ? formatDistanceKm(longestDistance.distanceM, 1) : "--",
-      date: longestDistance?.date ?? "--",
+      value: displayLongestDistance ? formatDistanceKm(displayLongestDistance, 1) : "--",
+      date: getRecordDate(prLongest, longestDistance?.date),
     },
   ];
 
