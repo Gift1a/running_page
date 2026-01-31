@@ -314,7 +314,7 @@ export default function App() {
         </section>
 
         <section className="mt-8">
-          <PersonalBests activities={data.activities} />
+          <PersonalBests activities={data.activities} personalRecords={data.personalRecords} />
         </section>
         </div>
       </main>

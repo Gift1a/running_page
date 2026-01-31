@@ -73,3 +73,19 @@ export type Distributions = {
   avgHr: Distribution;
   distanceM: Distribution;
 };
+
+export type PersonalRecordItem = {
+  timeSec?: number | null;
+  distanceM?: number | null;
+  date?: string | null;
+  activityId?: string | null;
+  label?: string | null;
+};
+
+export type PersonalRecords = {
+  source: "garmin";
+  fetchedAt?: string;
+  best5k?: PersonalRecordItem | null;
+  best10k?: PersonalRecordItem | null;
+  longestDistance?: PersonalRecordItem | null;
+};

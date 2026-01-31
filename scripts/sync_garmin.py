@@ -10,6 +10,7 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+from datetime import datetime, timezone
 
 import garth
 import httpx
@@ -34,6 +35,288 @@ PROXY_ENV_KEYS = [
     "all_proxy",
 ]
 NO_PROXY_KEYS = ["NO_PROXY", "no_proxy"]
+
+PR_NAME_KEYS = [
+    "recordType",
+    "recordName",
+    "name",
+    "displayName",
+    "distanceName",
+    "distanceLabel",
+]
+PR_DISTANCE_KEYS = [
+    "distance",
+    "distanceM",
+    "distanceMeters",
+    "distanceInMeters",
+    "distanceValue",
+    "recordDistance",
+    "recordDistanceInMeters",
+]
+PR_TIME_KEYS = [
+    "duration",
+    "durationS",
+    "durationSeconds",
+    "durationInSeconds",
+    "time",
+    "timeInSeconds",
+    "recordTime",
+    "recordTimeInSeconds",
+    "recordValue",
+]
+PR_DATE_KEYS = [
+    "date",
+    "activityDate",
+    "startTimeLocal",
+    "startTimeGMT",
+    "startTime",
+]
+PR_ACTIVITY_KEYS = ["activityId", "activityID", "activity_id", "activityIdValue"]
+
+
+def _parse_float(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_time_seconds(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        if v <= 0:
+            return None
+        if v > 1e7:
+            v /= 1000.0
+        return v
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if ":" in text:
+            parts = [p for p in text.split(":") if p]
+            try:
+                nums = [float(p) for p in parts]
+            except ValueError:
+                return None
+            if len(nums) == 2:
+                minutes, seconds = nums
+                return minutes * 60 + seconds
+            if len(nums) == 3:
+                hours, minutes, seconds = nums
+                return hours * 3600 + minutes * 60 + seconds
+        v = _parse_float(text)
+        if v is None or v <= 0:
+            return None
+        if v > 1e7:
+            v /= 1000.0
+        return v
+    return None
+
+
+def parse_distance_m(value):
+    v = _parse_float(value)
+    if v is None or v <= 0:
+        return None
+    if v < 1000:
+        return v * 1000.0
+    return v
+
+
+def normalize_date(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        if ts > 1e12:
+            ts /= 1000.0
+        try:
+            return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+        except (OSError, ValueError):
+            return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if "T" in text:
+            return text.split("T")[0]
+        if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+            return text[:10]
+        return text
+    return None
+
+
+def _collect_record_dicts(raw, output):
+    if isinstance(raw, list):
+        for item in raw:
+            _collect_record_dicts(item, output)
+        return
+    if isinstance(raw, dict):
+        if any(key in raw for key in PR_NAME_KEYS + PR_DISTANCE_KEYS + PR_TIME_KEYS):
+            output.append(raw)
+        for value in raw.values():
+            _collect_record_dicts(value, output)
+
+
+def _record_label(record):
+    for key in PR_NAME_KEYS:
+        value = record.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _record_activity_id(record):
+    for key in PR_ACTIVITY_KEYS:
+        value = record.get(key)
+        if value is not None:
+            return str(value)
+    return None
+
+
+def _record_distance(record):
+    for key in PR_DISTANCE_KEYS:
+        if key in record:
+            return parse_distance_m(record.get(key))
+    return None
+
+
+def _record_time(record):
+    for key in PR_TIME_KEYS:
+        if key in record:
+            return parse_time_seconds(record.get(key))
+    return None
+
+
+def _record_date(record):
+    for key in PR_DATE_KEYS:
+        if key in record:
+            return normalize_date(record.get(key))
+    return None
+
+
+def _matches_distance(distance_m, target_m):
+    if distance_m is None:
+        return False
+    return abs(distance_m - target_m) <= target_m * 0.05
+
+
+def normalize_personal_records(raw):
+    records = []
+    _collect_record_dicts(raw, records)
+    if not records:
+        return None
+
+    best5k = None
+    best10k = None
+    longest = None
+    best5k_time = None
+    best10k_time = None
+    longest_distance = None
+
+    for record in records:
+        label = _record_label(record)
+        label_text = label.lower() if label else ""
+        distance_m = _record_distance(record)
+        time_s = _record_time(record)
+        date = _record_date(record)
+        activity_id = _record_activity_id(record)
+
+        is_5k = "5k" in label_text or "5 km" in label_text or "5公里" in label_text
+        is_10k = "10k" in label_text or "10 km" in label_text or "10公里" in label_text
+
+        if not is_5k and _matches_distance(distance_m, 5000):
+            is_5k = True
+        if not is_10k and _matches_distance(distance_m, 10000):
+            is_10k = True
+
+        if is_5k and time_s:
+            if best5k_time is None or time_s < best5k_time:
+                best5k_time = time_s
+                best5k = {
+                    "timeSec": time_s,
+                    "distanceM": distance_m,
+                    "date": date,
+                    "activityId": activity_id,
+                    "label": label,
+                }
+
+        if is_10k and time_s:
+            if best10k_time is None or time_s < best10k_time:
+                best10k_time = time_s
+                best10k = {
+                    "timeSec": time_s,
+                    "distanceM": distance_m,
+                    "date": date,
+                    "activityId": activity_id,
+                    "label": label,
+                }
+
+        if distance_m:
+            if longest_distance is None or distance_m > longest_distance:
+                longest_distance = distance_m
+                longest = {
+                    "distanceM": distance_m,
+                    "timeSec": time_s,
+                    "date": date,
+                    "activityId": activity_id,
+                    "label": label,
+                }
+
+    if not best5k and not best10k and not longest:
+        return None
+
+    return {
+        "source": "garmin",
+        "fetchedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "best5k": best5k,
+        "best10k": best10k,
+        "longestDistance": longest,
+    }
+
+
+def fetch_personal_records(email, password, is_cn):
+    try:
+        from garminconnect import Garmin
+    except Exception as exc:
+        print(f"Personal records disabled: garminconnect not installed ({exc}).")
+        return None
+
+    try:
+        try:
+            client = Garmin(email, password, is_cn=is_cn)
+        except TypeError:
+            client = Garmin(email, password)
+        if hasattr(client, "login"):
+            client.login()
+        elif hasattr(client, "login_retry"):
+            client.login_retry()
+        if hasattr(client, "get_personal_records"):
+            return client.get_personal_records()
+        if hasattr(client, "get_personal_record"):
+            return client.get_personal_record()
+    except Exception as exc:
+        print(f"Personal records fetch failed: {exc}")
+        return None
+    return None
+
+
+def write_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=True, separators=(",", ":"))
+
+
+def clear_personal_records(out_dir, public_dir):
+    for name in ("personal-records.json", "personal-records-raw.json"):
+        for base in (Path(out_dir), Path(public_dir)):
+            path = base / name
+            if path.exists():
+                path.unlink()
 
 
 def is_valid_secret(secret):
@@ -218,6 +501,8 @@ def main():
     parser.add_argument("--use-env-proxy", action="store_true", help="Use system proxy env")
     parser.add_argument("--public-dir", default=str(DEFAULT_PUBLIC_DIR))
     parser.add_argument("--skip-publish", action="store_true", help="Skip copying JSON to public")
+    parser.add_argument("--fetch-pr", action="store_true", help="Fetch personal records (optional)")
+    parser.add_argument("--pr-debug", action="store_true", help="Write raw personal records JSON")
     args = parser.parse_args()
 
     secret = ensure_secret(args)
@@ -230,6 +515,29 @@ def main():
 
     print(f"Found {len(activity_ids)} activities, downloaded {downloaded} new FIT files.")
     print(f"Sync finished in {time.time() - start_time:.1f}s")
+
+    personal_records = None
+    if args.fetch_pr:
+        if not args.email or not args.password:
+            print("Personal records fetch skipped: missing --email/--password.")
+        else:
+            raw_records = fetch_personal_records(args.email, args.password, args.is_cn)
+            if raw_records is not None:
+                personal_records = normalize_personal_records(raw_records)
+                if personal_records:
+                    write_json(ROOT / "data" / "derived" / "personal-records.json", personal_records)
+                    if args.pr_debug:
+                        write_json(
+                            ROOT / "data" / "derived" / "personal-records-raw.json",
+                            raw_records,
+                        )
+                else:
+                    print("Personal records returned but no usable entries were parsed.")
+            else:
+                print("Personal records fetch failed or returned no data.")
+
+        if personal_records is None:
+            clear_personal_records(ROOT / "data" / "derived", args.public_dir)
 
     if not args.skip_parse:
         run_parse(ROOT, args.fit_dir)
