@@ -523,21 +523,26 @@ def main():
         else:
             raw_records = fetch_personal_records(args.email, args.password, args.is_cn)
             if raw_records is not None:
+                if args.pr_debug:
+                    write_json(
+                        ROOT / "data" / "derived" / "personal-records-raw.json",
+                        raw_records,
+                    )
                 personal_records = normalize_personal_records(raw_records)
                 if personal_records:
                     write_json(ROOT / "data" / "derived" / "personal-records.json", personal_records)
-                    if args.pr_debug:
-                        write_json(
-                            ROOT / "data" / "derived" / "personal-records-raw.json",
-                            raw_records,
-                        )
                 else:
                     print("Personal records returned but no usable entries were parsed.")
             else:
                 print("Personal records fetch failed or returned no data.")
 
         if personal_records is None:
-            clear_personal_records(ROOT / "data" / "derived", args.public_dir)
+            # Keep raw debug output if present, but clear parsed records to avoid stale data.
+            for name in ("personal-records.json",):
+                for base in (ROOT / "data" / "derived", Path(args.public_dir)):
+                    path = base / name
+                    if path.exists():
+                        path.unlink()
 
     if not args.skip_parse:
         run_parse(ROOT, args.fit_dir)
