@@ -70,8 +70,21 @@ PR_DATE_KEYS = [
     "startTimeLocal",
     "startTimeGMT",
     "startTime",
+    "activityStartDateTimeLocalFormatted",
+    "actStartDateTimeInGMTFormatted",
+    "prStartTimeGmtFormatted",
+    "prStartTimeLocalFormatted",
+    "activityStartDateTimeLocal",
+    "activityStartDateTimeInGMT",
+    "prStartTimeGmt",
+    "prStartTimeLocal",
 ]
 PR_ACTIVITY_KEYS = ["activityId", "activityID", "activity_id", "activityIdValue"]
+PR_TYPE_ID_MAP = {
+    3: {"kind": "best5k_time", "label": "Best 5K"},
+    4: {"kind": "best10k_time", "label": "Best 10K"},
+    7: {"kind": "longest_distance", "label": "Longest distance"},
+}
 
 
 def _parse_float(value):
@@ -156,7 +169,11 @@ def _collect_record_dicts(raw, output):
             _collect_record_dicts(item, output)
         return
     if isinstance(raw, dict):
-        if any(key in raw for key in PR_NAME_KEYS + PR_DISTANCE_KEYS + PR_TIME_KEYS):
+        if (
+            any(key in raw for key in PR_NAME_KEYS + PR_DISTANCE_KEYS + PR_TIME_KEYS)
+            or "typeId" in raw
+            or "value" in raw
+        ):
             output.append(raw)
         for value in raw.values():
             _collect_record_dicts(value, output)
@@ -219,15 +236,57 @@ def normalize_personal_records(raw):
     longest_distance = None
 
     for record in records:
+        type_id = record.get("typeId")
         label = _record_label(record)
         label_text = label.lower() if label else ""
-        distance_m = _record_distance(record)
-        time_s = _record_time(record)
         date = _record_date(record)
         activity_id = _record_activity_id(record)
 
-        is_5k = "5k" in label_text or "5 km" in label_text or "5公里" in label_text
-        is_10k = "10k" in label_text or "10 km" in label_text or "10公里" in label_text
+        if type_id in PR_TYPE_ID_MAP:
+            kind = PR_TYPE_ID_MAP[type_id]["kind"]
+            label = label or PR_TYPE_ID_MAP[type_id]["label"]
+            if kind == "best5k_time":
+                time_s = parse_time_seconds(record.get("value"))
+                if time_s and (best5k_time is None or time_s < best5k_time):
+                    best5k_time = time_s
+                    best5k = {
+                        "timeSec": time_s,
+                        "distanceM": 5000.0,
+                        "date": date,
+                        "activityId": activity_id,
+                        "label": label,
+                    }
+                continue
+            if kind == "best10k_time":
+                time_s = parse_time_seconds(record.get("value"))
+                if time_s and (best10k_time is None or time_s < best10k_time):
+                    best10k_time = time_s
+                    best10k = {
+                        "timeSec": time_s,
+                        "distanceM": 10000.0,
+                        "date": date,
+                        "activityId": activity_id,
+                        "label": label,
+                    }
+                continue
+            if kind == "longest_distance":
+                distance_m = parse_distance_m(record.get("value"))
+                if distance_m and (longest_distance is None or distance_m > longest_distance):
+                    longest_distance = distance_m
+                    longest = {
+                        "distanceM": distance_m,
+                        "timeSec": None,
+                        "date": date,
+                        "activityId": activity_id,
+                        "label": label,
+                    }
+                continue
+
+        distance_m = _record_distance(record)
+        time_s = _record_time(record)
+
+        is_5k = "5k" in label_text or "5 km" in label_text
+        is_10k = "10k" in label_text or "10 km" in label_text
 
         if not is_5k and _matches_distance(distance_m, 5000):
             is_5k = True
@@ -277,8 +336,6 @@ def normalize_personal_records(raw):
         "best10k": best10k,
         "longestDistance": longest,
     }
-
-
 def fetch_personal_records(email, password, is_cn):
     try:
         from garminconnect import Garmin
